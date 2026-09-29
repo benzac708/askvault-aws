@@ -6,10 +6,8 @@ __pycache__/
 # Terraform (lock file IS committed; tfvars are never committed)
 terraform/.terraform/
 terraform/.cache/
-*.tfstate
-*.tfstate.backup
+*.tfstate*
 *.tfplan
-*.tfstate.lock.info
 *.tfvars
 
 # Tooling
