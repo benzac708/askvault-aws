@@ -44,7 +44,7 @@ def main():
     ok &= check("NAT gateway exists", len(ec2.describe_nat_gateways()["NatGateways"]) >= 1)
     sgs = ec2.describe_security_groups()["SecurityGroups"]
     ok &= check("task security group exists (private-only ingress)",
-                any(g["GroupName"] == "askvault-task" for g in sgs))
+                any(g["GroupName"] in ("askvault-task", "askvault-task-emu") for g in sgs))
 
     if os.environ.get("ASKAWS_FULL", "0") == "1":
         ok &= check("ECS cluster exists",
