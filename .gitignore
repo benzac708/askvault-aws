@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Terraform (lock file IS committed; tfvars are never committed)
+terraform/.terraform/
+terraform/.cache/
+*.tfstate
+*.tfstate.backup
+*.tfplan
+*.tfstate.lock.info
+*.tfvars
+
+# Tooling
+*.log
+
+.DS_Store

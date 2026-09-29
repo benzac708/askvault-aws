@@ -1,0 +1,89 @@
+name: ci
+
+# The same loop as aws-localstack: cheap static gates first, then the
+# emulated end-to-end apply -> smoke -> destroy. Public repository, so these
+# runs use free minutes and never touch a real AWS account.
+
+"on":
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  TF_VERSION: "1.16.2"
+  # LocalStack accepts any credentials, but boto3 still needs them to sign.
+  AWS_ACCESS_KEY_ID: "test"
+  AWS_SECRET_ACCESS_KEY: "test"
+  AWS_DEFAULT_REGION: "us-east-1"
+
+jobs:
+  verify:
+    name: lint, validate, emulated apply
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Terraform (pinned)
+        run: |
+          set -euo pipefail
+          # HashiCorp publishes SHA256SUMS for its zips; verify before unzip.
+          BASE="https://releases.hashicorp.com/terraform/${TF_VERSION}"
+          cd "$(mktemp -d)"
+          curl -fsSL -O "${BASE}/terraform_${TF_VERSION}_linux_amd64.zip"
+          curl -fsSL -O "${BASE}/terraform_${TF_VERSION}_SHA256SUMS"
+          grep 'terraform_.*_linux_amd64.zip' "terraform_${TF_VERSION}_SHA256SUMS" \
+            | sha256sum -c -
+          unzip -o -q "terraform_${TF_VERSION}_linux_amd64.zip" -d /usr/local/bin
+          terraform version
+
+      - name: Terraform fmt + validate
+        run: |
+          cd terraform
+          terraform fmt -check -recursive
+          terraform init -backend=false -reconfigure
+          terraform validate
+
+      - name: actionlint
+        run: |
+          docker run --rm -v "$PWD":/src -w /src rhysd/actionlint:latest
+
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Start LocalStack
+        run: |
+          docker compose up -d localstack
+          for i in $(seq 1 30); do
+            curl -fsS http://localhost:4566/_localstack/health >/dev/null 2>&1 && break
+            [ "$i" -lt 30 ] || {
+              echo "LocalStack did not become healthy in time"
+              docker compose logs localstack | tail -30
+              exit 1
+            }
+            sleep 2
+          done
+          curl -fsS http://localhost:4566/_localstack/health | head -1
+
+      - name: Terraform apply (emulated)
+        run: |
+          cd terraform
+          terraform init -backend=false -reconfigure
+          terraform apply -auto-approve
+
+      - name: Smoke test
+        run: |
+          python3 -m pip install --quiet boto3
+          python3 scripts/smoke.py
+          cd terraform && terraform destroy -auto-approve
+      - name: Stop LocalStack
+        if: always()
+        run: docker compose down
